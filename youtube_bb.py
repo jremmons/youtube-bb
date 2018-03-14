@@ -12,7 +12,7 @@
 
 from __future__ import unicode_literals
 from ffmpy import FFmpeg
-from subprocess import check_call
+from subprocess import check_call, check_output
 from concurrent import futures
 from random import shuffle
 from datetime import datetime
@@ -26,8 +26,8 @@ import csv
 
 # The data sets to be downloaded
 d_sets = [
-          'yt_bb_detection_train',
-          'yt_bb_detection_validation',
+          #'yt_bb_detection_train',
+          #'yt_bb_detection_validation',
           'yt_bb_classification_train',
           'yt_bb_classification_validation',
           ]
@@ -142,37 +142,34 @@ def dl_and_cut(vid):
 
   # Use youtube_dl to download the video
   FNULL = open(os.devnull, 'w')
-  check_call(['youtube-dl', \
-    #'--no-progress', \
-    '-f','best[ext=mp4]', \
-    '-o',d_set_dir+'/'+vid.yt_id+'_temp.mp4', \
-    'youtu.be/'+vid.yt_id ], \
-     stdout=FNULL,stderr=subprocess.STDOUT )
+  url = check_output(['youtube-dl', \
+        '-f','best[ext=mp4]', \
+        '--get-url', \
+        'https://youtu.be/'+vid.yt_id ])
 
   for clip in vid.clips:
-    # Verify that the video has been downloaded. Skip otherwise
-    if os.path.exists(d_set_dir+'/'+vid.yt_id+'_temp.mp4'):
-      # Make the class directory if it doesn't exist yet
-      class_dir = d_set_dir+'/'+str(clip.class_id)
-      check_call(' '.join(['mkdir', '-p', class_dir]), shell=True)
 
-      # Cut out the clip within the downloaded video and save the clip
-      # in the correct class directory. Full re-encoding is used to maintain
-      # frame accuracy. See here for more detail:
-      # http://www.markbuckler.com/post/cutting-ffmpeg/
-      check_call(['ffmpeg',\
-        '-i','file:'+d_set_dir+'/'+vid.yt_id+'_temp.mp4',\
-        '-ss', str(float(clip.start)/1000),\
-        '-strict','-2',\
-        '-t', str((float(clip.stop)-float(clip.start))/1000),\
-        '-threads','1',\
-        class_dir+'/'+clip.name+'.mp4'],
-         stdout=FNULL,stderr=subprocess.STDOUT )
+    # Make the class directory if it doesn't exist yet
+    class_dir = d_set_dir+'/'+str(clip.class_id)
+    check_call(' '.join(['mkdir', '-p', class_dir]), shell=True)
+      
+    # Cut out the clip within the downloaded video and save the clip
+    # in the correct class directory. Full re-encoding is used to maintain
+    # frame accuracy. See here for more detail:
+    # http://www.markbuckler.com/post/cutting-ffmpeg/
+    cmd = ['ffmpeg', '-y',\
+                '-ss', str(float(clip.start)/1000),\
+                '-t', str((float(clip.stop)-float(clip.start))/1000),\
+                '-i', url.decode('utf-8').strip(),
+                '-threads','1',\
+                '-c:a', 'copy', '-c:v', 'copy', \
+                class_dir+'/'+clip.name+'.mp4']
+    check_call(cmd)
+                
+    # Remove the temporary video
+    # os.remove(d_set_dir+'/'+vid.yt_id+'_temp.mp4')
 
-  # Remove the temporary video
-  os.remove(d_set_dir+'/'+vid.yt_id+'_temp.mp4')
-
-
+    
 # Parse the annotation csv file and schedule downloads and cuts
 def parse_annotations(d_set,dl_dir):
 
@@ -287,8 +284,8 @@ def sched_downloads(d_set,dl_dir,num_threads,vids):
     fs = [executor.submit(dl_and_cut,vid) for vid in vids]
     for i, f in enumerate(futures.as_completed(fs)):
       # Write progress to error so that it can be seen
-      sys.stderr.write( \
-        "Downloaded video: {} / {} \r".format(i, len(vids)))
+      sys.stdout.write( \
+        "Downloaded video: {} / {} \n".format(i, len(vids)))
 
   print( d_set+': All videos downloaded' )
 
